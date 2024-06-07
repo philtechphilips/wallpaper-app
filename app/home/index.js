@@ -14,6 +14,7 @@ import { theme } from "../../constants/theme";
 import { hp, wp } from "../../helpers/common";
 import Categories from "../../components/categories";
 import { apiCall } from "../../api";
+import ImageGrid from "../../components/imageGrid";
 
 const HomeScreen = () => {
   const { top } = useSafeAreaInsets();
@@ -22,6 +23,7 @@ const HomeScreen = () => {
   const [search, setSearch] = useState("");
   const searchInputRefrence = useRef(null);
   const [activeCategory, setActiveCategory] = useState("");
+  const [images, setImages] = useState([]);
 
   const handleCategoryChange = (category) => {
     setActiveCategory(category)
@@ -31,9 +33,15 @@ const HomeScreen = () => {
     fetchImages();
   }, []);
 
-  const fetchImages = async (params={page: 1}, append=true) => {
+  const fetchImages = async (params={page: 1}, append=false) => {
     let result = await apiCall(params);
-    console.log('result', result)
+    if(result.success && result?.data?.hits){
+      if(append){
+        setImages([...images, ...result.data.hits]);
+      }else{
+        setImages([...result.data.hits]);
+      }
+    }
   }
 
   return (
@@ -81,6 +89,12 @@ const HomeScreen = () => {
 
         <View style={styles.categories}>
           <Categories activeCategory={activeCategory} handleCategoryChange={handleCategoryChange} />
+        </View>
+
+        <View>
+        {images && images.length > 0 && (
+          <ImageGrid images={images} />
+        )}
         </View>
       </ScrollView>
       <StatusBar barStyle="dark-content" />
