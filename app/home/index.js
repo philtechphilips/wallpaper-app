@@ -1,4 +1,5 @@
 import {
+  ActivityIndicator,
   Pressable,
   ScrollView,
   StatusBar,
@@ -7,7 +8,7 @@ import {
   TextInput,
   View,
 } from "react-native";
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Feather, FontAwesome6, Ionicons } from "@expo/vector-icons";
 import { theme } from "../../constants/theme";
@@ -15,6 +16,10 @@ import { hp, wp } from "../../helpers/common";
 import Categories from "../../components/categories";
 import { apiCall } from "../../api";
 import ImageGrid from "../../components/imageGrid";
+import { debounce } from "lodash";
+import FiltersModal from "../../components/filtersModal";
+
+let page = 1;
 
 const HomeScreen = () => {
   const { top } = useSafeAreaInsets();
@@ -24,33 +29,137 @@ const HomeScreen = () => {
   const searchInputRefrence = useRef(null);
   const [activeCategory, setActiveCategory] = useState("");
   const [images, setImages] = useState([]);
+  const [filters, setFilters] = useState(null);
+  const [isEndReached, setEndReached] = useState(false);
+  const scrollRef = useRef(null);
+
+  const modalRef = useRef(null);
 
   const handleCategoryChange = (category) => {
-    setActiveCategory(category)
-  }
+    setActiveCategory(category);
+    setSearch("");
+    searchInputRefrence?.current?.clear();
+    setImages([]);
+    page = 1;
+    let params = {
+      page,
+      ...filters,
+    };
+    if (category) params.category = category;
+    fetchImages(params, false);
+  };
+
+  const handleSearch = (text) => {
+    setSearch(text);
+
+    if (text.length > 2) {
+      page = 1;
+      setImages([]);
+      setActiveCategory(null);
+      fetchImages({ page, q: text, ...filters }, false);
+    }
+
+    if (text == "") {
+      page = 1;
+      setImages([]);
+      searchInputRefrence?.current?.clear();
+      setActiveCategory(null);
+      fetchImages({ page, ...filters }, false);
+    }
+  };
+
+  const hadleTextDebounce = useCallback(debounce(handleSearch, 400), []);
 
   useEffect(() => {
     fetchImages();
   }, []);
 
-  const fetchImages = async (params={page: 1}, append=false) => {
+  const fetchImages = async (params = { page: 1 }, append = true) => {
     let result = await apiCall(params);
-    if(result.success && result?.data?.hits){
-      if(append){
+    if (result.success && result?.data?.hits) {
+      if (append) {
         setImages([...images, ...result.data.hits]);
-      }else{
+      } else {
         setImages([...result.data.hits]);
       }
     }
-  }
+  };
+
+  const openFiltersModal = () => {
+    modalRef?.current?.present();
+  };
+
+  const closeFiltersModal = () => {
+    modalRef?.current?.close();
+  };
+
+  const applyFilters = () => {
+    if (filters) {
+      page = 1;
+      setImages([]);
+      let params = {
+        page,
+        ...filters,
+      };
+      if (activeCategory) params.category = activeCategory;
+      if (search) params.q = search;
+      fetchImages(params, false);
+    }
+    closeFiltersModal();
+  };
+
+  const resetFilters = () => {
+    if (filters) {
+      page = 1;
+      setFilters(null);
+      setImages([]);
+      let params = {
+        page,
+      };
+      if (activeCategory) params.category = activeCategory;
+      if (search) params.q = search;
+      fetchImages(params, false);
+    }
+    closeFiltersModal();
+  };
+
+  const handleScrollUp = () => {
+    scrollRef?.current?.scrollTo({
+      y: 0,
+      animated: true,
+    });
+  };
+
+  const handleScroll = (event) => {
+    const contentHeight = event.nativeEvent.contentSize.height;
+    const scrollViewHeight = event.nativeEvent.layoutMeasurement.height;
+    const scrollOffset = event.nativeEvent.contentOffset.y;
+    const bottomPosition = contentHeight - scrollViewHeight;
+
+    if (scrollOffset >= bottomPosition - 1) {
+      if (!isEndReached) {
+        setEndReached(true);
+        ++page;
+        let params = {
+          page,
+          ...filters,
+        };
+        if (activeCategory) params.category = activeCategory;
+        if (search) params.q = search;
+        fetchImages(params);
+      }
+    } else if (isEndReached) {
+      setEndReached(false);
+    }
+  };
 
   return (
     <View style={[styles.container, { paddingTop }]}>
       <View style={styles.header}>
-        <Pressable>
+        <Pressable onPress={handleScrollUp}>
           <Text style={styles.title}>Pixels</Text>
         </Pressable>
-        <Pressable>
+        <Pressable onPress={openFiltersModal}>
           <FontAwesome6
             name="bars-staggered"
             size={22}
@@ -59,7 +168,12 @@ const HomeScreen = () => {
         </Pressable>
       </View>
 
-      <ScrollView contentContainerStyle={{ gap: 15 }}>
+      <ScrollView
+        onScroll={handleScroll}
+        scrollEventThrottle={5}
+        ref={scrollRef}
+        contentContainerStyle={{ gap: 15 }}
+      >
         <View style={styles.searchBar}>
           <View style={styles.searchIcon}>
             <Feather
@@ -72,12 +186,12 @@ const HomeScreen = () => {
             placeholder="Search for photos..."
             style={styles.searchInput}
             placeholderTextColor="#888"
-            value={search}
+            // value={search}
             ref={searchInputRefrence}
-            onChangeText={(value) => setSearch(value)}
+            onChangeText={hadleTextDebounce}
           />
           {search && (
-            <Pressable style={styles.closeIcon}>
+            <Pressable onPress={() => setSearch("")} style={styles.closeIcon}>
               <Ionicons
                 name="close"
                 size={24}
@@ -88,15 +202,31 @@ const HomeScreen = () => {
         </View>
 
         <View style={styles.categories}>
-          <Categories activeCategory={activeCategory} handleCategoryChange={handleCategoryChange} />
+          <Categories
+            activeCategory={activeCategory}
+            handleCategoryChange={handleCategoryChange}
+          />
         </View>
 
         <View>
-        {images && images.length > 0 && (
-          <ImageGrid images={images} />
-        )}
+          {images && images.length > 0 && <ImageGrid images={images} />}
+        </View>
+
+        <View
+          style={{ marginBottom: 70, marginTop: images.length > 0 ? 10 : 70 }}
+        >
+          <ActivityIndicator size="large" />
         </View>
       </ScrollView>
+
+      <FiltersModal
+        modalRef={modalRef}
+        filters={filters}
+        setFilters={setFilters}
+        onClose={closeFiltersModal}
+        onApply={applyFilters}
+        onReset={resetFilters}
+      />
       <StatusBar barStyle="dark-content" />
     </View>
   );
